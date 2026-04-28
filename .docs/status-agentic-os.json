@@ -1,0 +1,20 @@
+{
+  "completed": [
+    "project-init",
+    "backend-foundation",
+    "frontend-ui",
+    "system-prompt-management",
+    "ast-codegen",
+    "os-level-integration",
+    "context-caching",
+    "document-parsing-integration",
+    "pytest-suite-integration",
+    "agent-reflection-capabilities",
+    "ast-polyglot-enhancements"
+  ],
+  "in_progress": [],
+  "blocked": [],
+  "next": [
+    "deploy-to-local-debian"
+  ]
+}

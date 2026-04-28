@@ -1,0 +1,6 @@
+{
+  "name": "Forge Agentic OS",
+  "description": "A powerful agentic coding assistant with a Python FastAPI/LangGraph backend and React frontend.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
