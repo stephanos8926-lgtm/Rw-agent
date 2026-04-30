@@ -7,18 +7,23 @@ COPY . .
 RUN npm run build
 
 # Final Production Image
-FROM python:3.10-slim
+FROM python:3.12-slim
 
-# Install system dependencies (needed by LangGraph and Python app)
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 WORKDIR /app
 
-# Install Python backend dependencies
+# Install Python backend dependencies using uv
 COPY backend/requirements.txt backend/
-RUN pip install --no-cache-dir -r backend/requirements.txt
+COPY backend/pyproject.toml backend/
+RUN cd backend && uv sync
 
 # Copy backend files
 COPY backend/ backend/
@@ -26,8 +31,8 @@ COPY backend/ backend/
 # Copy built frontend from build stage
 COPY --from=frontend-builder /app/dist /app/dist
 
-# Expose port (ensure it matches the backend config in server.py)
+# Expose port
 EXPOSE 8000
 
-# Start command (assumes uvicorn is installed in the python environment)
-CMD ["python", "-m", "uvicorn", "backend.server:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start command using uv
+CMD ["uv", "run", "--project", "backend", "python", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]

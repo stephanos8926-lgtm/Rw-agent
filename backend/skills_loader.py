@@ -2,7 +2,7 @@ import os
 import yaml
 
 class SkillsLoader:
-    def __init__(self, skills_dir: str = "backend/skills"):
+    def __init__(self, skills_dir: str = "/skills"):
         self.skills_dir = skills_dir
         self.skills = []
 

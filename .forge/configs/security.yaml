@@ -1,0 +1,9 @@
+sandboxing_enabled: true
+allowed_commands:
+  - ls
+  - cat
+  - grep
+  - python
+  - pytest
+  - git
+  - rg

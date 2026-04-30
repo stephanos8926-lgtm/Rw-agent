@@ -9,17 +9,43 @@ import argparse
 # Ensure backend module is resolvable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-parser = argparse.ArgumentParser(description="Forge Agentic OS Backend")
-parser.add_argument("--workspace", default=".", help="Workspace root directory")
-args = parser.parse_args()
-WORKSPACE_DIR = args.workspace if args.workspace != "." else os.getcwd()
+from backend.workspace_manager import workspace_manager
+from backend.config_manager import ConfigManager
+from backend.message_bus import MessageBus
+from backend.plugin_system import PluginSystem
+from backend.tools import get_os_info, build_ast_symbol_map
+from backend.context_manager import context_manager
+import logging
+
+# WORKSPACE_DIR will be managed via the workspace manager
+WORKSPACE_DIR = workspace_manager.get_workspace_dir()
+
+# Initialization
+config_dir = os.path.join(WORKSPACE_DIR, ".forge", "configs")
+os.makedirs(config_dir, exist_ok=True)
+config_manager = ConfigManager(config_dir)
+
+message_bus = MessageBus()
+
+plugins_dir = os.path.join(WORKSPACE_DIR, ".forge", "plugins")
+os.makedirs(plugins_dir, exist_ok=True)
+plugin_system = PluginSystem(plugins_dir)
 
 from backend.agent import app_graph
 from backend.status_manager import status_manager
 from backend.skills_loader import skills_loader
 from backend.ast_parser import build_ast_symbol_map
+from backend.tools import set_yolo
+from backend.mcp_loader import start_mcp_loader
+from backend.telemetry import init_tracer
+import os
 
 app = FastAPI(title="Forge Agentic OS")
+init_tracer()
+
+# Initialize MCP Loader
+MCP_TOOLS_DIR = "/backend/mcp_tools"
+mcp_loader = start_mcp_loader(MCP_TOOLS_DIR)
 
 # Serve static files from the 'dist' directory
 app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
@@ -44,9 +70,19 @@ def get_status():
 def get_skills():
     return {"skills": skills_loader.skills}
 
+@app.get("/api/os-info")
+def get_os_info_route():
+    return {"info": get_os_info()}
+
 @app.get("/api/ast")
 def get_ast():
-    return json.loads(build_ast_symbol_map(directory=WORKSPACE_DIR))
+    cached_ast = context_manager.get("ast_symbol_map")
+    if cached_ast:
+        return cached_ast
+    
+    ast_map = json.loads(build_ast_symbol_map(directory=WORKSPACE_DIR))
+    context_manager.set("ast_symbol_map", ast_map)
+    return ast_map
 
 @app.websocket("/ws/agent")
 async def websocket_endpoint(websocket: WebSocket):
@@ -67,6 +103,27 @@ async def websocket_endpoint(websocket: WebSocket):
             
             if not user_input:
                 continue
+
+            # --- Slash Command Parsing ---
+            if user_input.startswith("/"):
+                parts = user_input.split(" ")
+                command = parts[0]
+                args = parts[1:]
+
+                if command == "/yolo":
+                    duration = int(args[0]) if len(args) > 0 else 0
+                    set_yolo(True, duration)
+                    response = f"YOLO mode enabled {f'for {duration}s' if duration > 0 else 'indefinitely'}."
+                    await websocket.send_json({"type": "message", "role": "agent", "content": response})
+                    continue
+                elif command == "/yolo-off":
+                    set_yolo(False)
+                    await websocket.send_json({"type": "message", "role": "agent", "content": "YOLO mode disabled."})
+                    continue
+                elif command == "/status":
+                    status = status_manager.read_status()
+                    await websocket.send_json({"type": "message", "role": "agent", "content": f"Current Status: {str(status)}"})
+                    continue
 
             # Stream user message back to UI
             await websocket.send_json({"type": "message", "role": "user", "content": user_input})

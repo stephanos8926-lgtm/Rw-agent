@@ -1,7 +1,11 @@
 import os
 import json
-from typing import TypedDict, Annotated, List, Any
+import time
+from backend.types import AgentState
+from backend import reflection, telemetry
+from typing import Annotated, List, Any
 from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.sqlite import SqliteSaver
 from google import genai
 from google.genai import types
 
@@ -10,14 +14,9 @@ from backend.prompt_manager import prompt_manager
 from backend.context_cache import context_cache_manager
 from backend.semantic_cache import semantic_cache, compute_context_hash
 from backend.skills_loader import skills_loader
+from backend.security import human_approval_gate
 
-class AgentState(TypedDict):
-    messages: Annotated[list, "The conversation history"]
-    current_plan: str
-    completed_tasks: List[str]
-    reflection: str
-    summary: str
-    next_agent: str
+
 
 def get_fallback_context() -> types.Content:
     """Loads the pre-computed symbol map and injects it manually if API Context Caching is bypassed."""
@@ -33,15 +32,28 @@ def initialize_genai_client():
          print("Warning: GEMINI_API_KEY not found in environment.")
     return genai.Client(api_key=api_key)
 
+# Initialize client once at module level for efficiency
+client = initialize_genai_client()
+
 def agent_node(state: AgentState):
     """The main reasoning node that uses Gemini 2.5 Flash."""
-    client = initialize_genai_client()
     messages = state["messages"]
+    memory_buffer = state.get("memory_buffer", [])
 
     system_instruction = prompt_manager.get_prompt("default")
+    
+    # Inject memory buffer into system instruction if present
+    if memory_buffer:
+        system_instruction += "\n\n--- Memory Buffer (Summarized Past Interactions) ---\n"
+        system_instruction += "\n".join(memory_buffer)
+        system_instruction += "\n----------------------------------------------------"
+
     skills_context = skills_loader.get_formatted_context()
     if skills_context:
         system_instruction += "\n\n" + skills_context
+
+    # ----- ... keep existing caching logic ... -----
+    # Note: Using module-level 'client'
 
     # ----- 1. INTERCEPT: Semantic Caching -----
     # Dynamically cache repetitive tool outputs and identical LLM reasoning requests
@@ -122,10 +134,15 @@ def tool_node(state: AgentState):
     func_name = fc["name"]
     args = fc["args"]
     
+    if not human_approval_gate(func_name, args):
+        return {"messages": [{"role": "tool", "content": f"Human approval required for: {func_name}. Please approve in UI."}]}
+    
     if func_name in TOOLS_REGISTRY:
         try:
             print(f"Executing tool: {func_name} with args: {args}")
+            start_time = time.time()
             result = TOOLS_REGISTRY[func_name](**args)
+            telemetry.trace_tool_execution(func_name, args, start_time)
             return {"messages": [{"role": "tool", "content": f"Result from {func_name}:\n{result}"}]}
         except Exception as e:
             return {"messages": [{"role": "tool", "content": f"Tool execution failed: {str(e)}"}]}
@@ -170,7 +187,9 @@ def build_graph():
     workflow.add_conditional_edges("reflection", should_continue, {"tools": "tools", "end": "summarization"})
     workflow.add_edge("summarization", END)
     workflow.add_edge("tools", "supervisor") # Back to supervisor after tool
-    return workflow.compile()
+    
+    checkpointer = SqliteSaver.from_conn_string("sqlite:///data/agent_checkpoints.db")
+    return workflow.compile(checkpointer=checkpointer)
 
 def planner_node(state: AgentState):
     """Generates a sub-task plan for long-horizon goals."""
@@ -186,26 +205,13 @@ def planner_node(state: AgentState):
 
 def reflection_node(state: AgentState):
     """Critiques the previous action against the goal or current plan."""
-    client = initialize_genai_client()
-    messages = state["messages"]
-    if not messages:
-        return {"reflection": "No history to reflect on."}
-        
-    last_action = messages[-1].get("content", "")
-    plan = state.get("current_plan", "")
-    
-    # Prompt the LLM for critique
-    prompt = f"Review the latest action: '{last_action}'.\nGoal/Plan: {plan}.\nIs this action advancing the goal? Critique it (concisely)."
-    
-    response = client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=prompt
-    )
-    
-    return {"reflection": response.text}
+    result = reflection.reflect_on_plan(state)
+    telemetry.log_event("agent_reflection", {"result": result})
+    return result
 
 def summarization_node(state: AgentState):
     """Summarizes history if too long."""
+    telemetry.log_event("agent_summarization", {"messages_count": len(state["messages"])})
     return {"summary": "Interaction summarized."}
 
 def supervisor_node(state: AgentState):

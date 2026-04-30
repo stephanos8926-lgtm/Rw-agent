@@ -5,7 +5,6 @@ Portainer makes managing containerized applications on a home server straightfor
 ## Prerequisites
 - **Portainer installed** on your home server.
 - **Docker installed** on your home server.
-- **Project code** copied to a directory on your server.
 
 ## Steps
 
@@ -14,23 +13,21 @@ Portainer makes managing containerized applications on a home server straightfor
    - Go to **Stacks** in the left menu.
    - Click **+ Add stack**.
    - Name your stack (e.g., `forge-agentic-os`).
-   - Choose **Repository** (if using GitHub) or **Web editor** (paste the configuration below).
-   - If using **Web editor**, paste the following `docker-compose.yml` configuration:
+   - Create a `docker-compose.yml` file in your project root or use the Web editor and paste the configuration below:
 
 ```yaml
 version: '3.8'
 services:
   app:
-    image: my-forge-app:latest # Build this tag locally or via CI
+    image: forge-agentic-app
     build: .
     container_name: forge-agentic-os
     ports:
       - "8000:8000"
     environment:
       - GEMINI_API_KEY=your_key_here # REQUIRED
-      - WORKSPACE_DIR=/app # Or map a volume to your local path
     volumes:
-      - ./workspace:/app/workspace # Map a local folder as the workspace
+      - ./data:/app/backend/data # Map for persistent SQLite data
     restart: unless-stopped
 ```
 
@@ -42,4 +39,4 @@ services:
    - Once the stack is running, access your app at `http://<your-server-ip>:8000`.
 
 ---
-*Note: Make sure to replace `your_key_here` with your actual GEMINI_API_KEY environment variable within Portainer's environment variable configuration section for the container.*
+*Note: Make sure to replace `your_key_here` with your actual GEMINI_API_KEY environment variable. Also, ensure the ./data directory exists on your host server to persist SQLite databases; otherwise, SQLite data won't survive container restarts.*

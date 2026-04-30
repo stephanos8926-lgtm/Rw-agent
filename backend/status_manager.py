@@ -15,7 +15,8 @@ class StatusManager:
                 "completed": [],
                 "in_progress": [],
                 "blocked": [],
-                "next": []
+                "next": [],
+                "dependencies": {}
             }, indent=2)
         try:
             with open(self.status_file, "r") as f:
@@ -23,14 +24,15 @@ class StatusManager:
         except Exception as e:
             return f"Error reading status: {e}"
 
-    def update_status(self, completed: List[str], in_progress: List[str], next_tasks: List[str]) -> str:
+    def update_status(self, completed: List[str], in_progress: List[str], next_tasks: List[str], dependencies: Dict[str, List[str]] = None) -> str:
         self._ensure_dir()
         try:
             data = {
                 "completed": completed,
                 "in_progress": in_progress,
                 "blocked": [],
-                "next": next_tasks
+                "next": next_tasks,
+                "dependencies": dependencies or {}
             }
             with open(self.status_file, "w") as f:
                 json.dump(data, f, indent=2)

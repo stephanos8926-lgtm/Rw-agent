@@ -25,7 +25,10 @@ LANG_MAP = {
         (class_declaration name: (identifier) @class)
         (function_declaration name: (identifier) @function)
         (method_declaration name: (property_identifier) @function)
+        (interface_declaration name: (identifier) @interface)
+        (type_alias_declaration name: (identifier) @type)
     """)
+}
 }
 
 class SymbolMapArgs(BaseModel):
@@ -66,10 +69,20 @@ def build_ast_symbol_map(directory: str = ".") -> str:
                         {"name": node.text.decode('utf-8'), "line": node.start_point[0] + 1} 
                         for node, capture_name in captures if capture_name == 'function'
                     ]
+                    interfaces = [
+                        {"name": node.text.decode('utf-8'), "line": node.start_point[0] + 1} 
+                        for node, capture_name in captures if capture_name == 'interface'
+                    ]
+                    types = [
+                        {"name": node.text.decode('utf-8'), "line": node.start_point[0] + 1} 
+                        for node, capture_name in captures if capture_name == 'type'
+                    ]
                             
                     symbol_graph[filepath] = {
                         "classes": classes,
-                        "functions": functions
+                        "functions": functions,
+                        "interfaces": interfaces,
+                        "types": types
                     }
                 except Exception as e:
                     symbol_graph[filepath] = {"error": str(e)}

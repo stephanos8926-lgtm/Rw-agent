@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAgent, ChatMessage } from './hooks/useAgent';
-import { Terminal, Send, Power, Code2, Cpu, Wrench, ChevronDown, ChevronRight, FileJson, Menu, X, Copy, Play } from 'lucide-react';
+import { WorkspaceSidebar } from './components/WorkspaceSidebar';
+import { SystemInfoModal } from './components/SystemInfoModal';
+import { Terminal, Send, Power, Code2, Cpu, Wrench, ChevronDown, ChevronRight, FileJson, Menu, X, Copy, Play, Info } from 'lucide-react';
 import Markdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github-dark.css';
@@ -9,6 +11,8 @@ import { motion, AnimatePresence } from 'motion/react';
 export default function App() {
   const [input, setInput] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [currentWorkspace, setCurrentWorkspace] = useState('default');
+  const [workspaces] = useState([{id: 'default', name: 'Default'}, {id: 'research', name: 'Research'}]);
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
   const [status, setStatus] = useState<any>(null);
   
@@ -19,8 +23,17 @@ export default function App() {
   }, []);
   const [skills, setSkills] = useState<any[]>([]);
   const [astData, setAstData] = useState<any>(null);
+  const [isSystemInfoOpen, setIsSystemInfoOpen] = useState(false);
+  const [systemInfo, setSystemInfo] = useState<string | null>(null);
   const [skillFilter, setSkillFilter] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch('/api/os-info')
+      .then(res => res.json())
+      .then(data => setSystemInfo(data.info))
+      .catch(err => console.error("Failed to fetch OS info:", err));
+  }, []);
 
   useEffect(() => {
     fetch('/api/ast')
@@ -130,6 +143,7 @@ export default function App() {
         </div>
         
         <div className="flex-1 overflow-y-auto p-4">
+          <WorkspaceSidebar workspaces={workspaces} currentWorkspace={currentWorkspace} onSelect={setCurrentWorkspace} />
           <div className="text-xs text-slate-500 uppercase tracking-widest mb-4 font-semibold mt-2">Project Progress</div>
           {status ? (
             <div className="space-y-1 bg-slate-950/50 p-3 rounded-lg border border-slate-800">
@@ -170,6 +184,7 @@ export default function App() {
           <div className="text-xs text-slate-500 uppercase tracking-widest mb-4 font-semibold mt-6">Session</div>
           <div className="space-y-1">
             <button onClick={exportChat} className="w-full text-left text-xs text-slate-400 hover:text-cyan-400 py-1 px-2 hover:bg-slate-800 rounded">Export Conversation</button>
+            <button onClick={() => setIsSystemInfoOpen(true)} className="w-full text-left text-xs text-slate-400 hover:text-cyan-400 py-1 px-2 hover:bg-slate-800 rounded flex items-center gap-2"><Info size={12} />System Info</button>
             <label className="block w-full text-left text-xs text-slate-400 hover:text-cyan-400 cursor-pointer py-1 px-2 hover:bg-slate-800 rounded">
               Import Conversation
               <input type="file" onChange={importChat} className="hidden" />
@@ -183,6 +198,7 @@ export default function App() {
              <Power size={16} className="mr-2" /> Reset Session
            </button>
         </div>
+        <SystemInfoModal isOpen={isSystemInfoOpen} onClose={() => setIsSystemInfoOpen(false)} info={systemInfo} />
       </motion.aside>
 
       {/* Main Content Area */}

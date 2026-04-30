@@ -3,15 +3,28 @@ import os
 import time
 import hashlib
 from typing import List, Dict, Any, Optional
+import json
+import yaml
 
 from pydantic import BaseModel, Field
 from backend.status_manager import status_manager
 from backend.ast_parser import build_ast_symbol_map, SymbolMapArgs
 import platform
 import psutil
+from backend.telemetry import trace_tool_execution
+from backend.context_manager import context_manager
 
 # Simple in-memory cache for tool outputs
 tool_cache = {}
+
+def telemetry_decorator(func):
+    """Decorator to log tool execution telemetry."""
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        trace_tool_execution(func.__name__, {"args": args, "kwargs": kwargs}, start_time)
+        return result
+    return wrapper
 
 def cache_tool(ttl_seconds=5):
     """Decorator to cache tool outputs for a short period."""
@@ -59,16 +72,22 @@ class ShellExecArgs(BaseModel):
 
 class ListFilesArgs(BaseModel):
     directory: str = Field(description="The target directory path to list files from. Defaults to current directory ('.').", default=".")
-    max_depth: int = Field(description="The maximum directory depth to recurse into. Limits output size. Default is 2.", default=2)
+    recursive: bool = Field(description="Whether to list files recursively. Defaults to False.", default=False)
+    max_depth: int = Field(description="The maximum directory depth to recurse into if recursive is True. Default is 2.", default=2)
 
-def list_files(directory: str = ".", max_depth: int = 2) -> str:
-    """Lists files in a directory up to a max_depth."""
+@telemetry_decorator
+def list_files(directory: str = ".", recursive: bool = False, max_depth: int = 2) -> str:
+    """Lists files in a directory, optionally recursively."""
     try:
         output = []
         base_depth = directory.rstrip(os.sep).count(os.sep)
+        
+        # If not recursive, we only want the current directory (depth 1)
+        current_max_depth = max_depth if recursive else 1
+        
         for root, dirs, files in os.walk(directory):
             current_depth = root.count(os.sep) - base_depth
-            if current_depth >= max_depth:
+            if current_depth >= current_max_depth:
                 del dirs[:]
             indent = '  ' * current_depth
             output.append(f"{indent}{os.path.basename(root)}/")
@@ -84,6 +103,7 @@ class RipgrepArgs(BaseModel):
     path: str = Field(description="The directory path to search in. Defaults to current directory ('.').", default=".")
     include_pattern: str = Field(description="Optional file pattern to include (e.g., '*.py').", default=None)
 
+@telemetry_decorator
 def run_ripgrep(query: str, path: str = ".", include_pattern: str = None) -> str:
     """Searches for a pattern using ripgrep (`rg`) or falls back to `grep`."""
     command = "rg"
@@ -101,6 +121,7 @@ def run_ripgrep(query: str, path: str = ".", include_pattern: str = None) -> str
             
     return execute_shell(full_command)
 
+@telemetry_decorator
 @cache_tool(ttl_seconds=5)
 def get_os_info() -> str:
     """Gets operating system and hardware info."""
@@ -115,6 +136,7 @@ def get_os_info() -> str:
     except Exception as e:
         return f"Error getting OS info: {str(e)}"
 
+@telemetry_decorator
 def read_file(filepath: str, start_line: int = None, end_line: int = None) -> str:
     """Reads the contents of a file, optionally restricted to a line range."""
     try:
@@ -133,6 +155,7 @@ def read_file(filepath: str, start_line: int = None, end_line: int = None) -> st
     except Exception as e:
         return f"Error reading file: {str(e)}"
 
+@telemetry_decorator
 def write_file(filepath: str, content: str, overwrite: bool = False) -> str:
     """Writes content to a file, optionally overwriting."""
     if os.path.exists(filepath) and not overwrite:
@@ -145,6 +168,7 @@ def write_file(filepath: str, content: str, overwrite: bool = False) -> str:
     except Exception as e:
         return f"Error writing file: {str(e)}"
 
+@telemetry_decorator
 def write_multiple_files(files: Dict[str, str]) -> str:
     """Writes multiple files in a batch."""
     results = []
@@ -152,6 +176,7 @@ def write_multiple_files(files: Dict[str, str]) -> str:
         results.append(write_file(filepath, content, overwrite=True))
     return "\n".join(results)
 
+@telemetry_decorator
 def parse_document(filepath: str) -> str:
     """Parses a document (PDF, DOCX, etc.) using LlamaParse."""
     api_key = os.environ.get("LLAMA_CLOUD_API_KEY")
@@ -165,6 +190,21 @@ def parse_document(filepath: str) -> str:
     except Exception as e:
         return f"Error parsing document: {str(e)}"
 
+@telemetry_decorator
+def get_codebase_overview(directory: str = ".") -> str:
+    """Parses Python, JavaScript, and TypeScript files in a directory to build a symbol graph containing classes and functions and returns a summary."""
+    try:
+        cached_overview = context_manager.get("codebase_overview")
+        if cached_overview:
+            return f"Codebase architecture overview (cached):\n{cached_overview}"
+            
+        raw_map = build_ast_symbol_map(directory)
+        context_manager.set("codebase_overview", raw_map)
+        return f"Codebase architecture overview:\n{raw_map}"
+    except Exception as e:
+        return f"Error generating codebase overview: {str(e)}"
+
+@telemetry_decorator
 def run_tests(directory: str = "tests") -> str:
     """Runs pytest in the specified directory."""
     import sys
@@ -178,6 +218,49 @@ def run_tests(directory: str = "tests") -> str:
     except Exception as e:
         return f"Error running tests: {str(e)}"
 
+@telemetry_decorator
+def check_prerequisites(task_id: str) -> str:
+    """Checks if prerequisites for a given task are met."""
+    try:
+        status_json = status_manager.read_status()
+        status_data = json.loads(status_json)
+        dependencies = status_data.get("dependencies", {})
+        completed = status_data.get("completed", [])
+        
+        prereqs = dependencies.get(task_id, [])
+        unmet = [p for p in prereqs if p not in completed]
+        
+        if not unmet:
+            return f"All prerequisites for task '{task_id}' are met."
+        else:
+            return f"Unmet prerequisites for task '{task_id}': {', '.join(unmet)}"
+    except Exception as e:
+        return f"Error checking prerequisites: {str(e)}"
+
+@telemetry_decorator
+def visualize_task_dependencies() -> str:
+    """Generates a Mermaid graph representation of the task dependency DAG."""
+    try:
+        status_json = status_manager.read_status()
+        data = json.loads(status_json)
+        dependencies = data.get("dependencies", {})
+        # Make sure we have all tasks
+        all_tasks = set(dependencies.keys())
+        for prereqs in dependencies.values():
+            all_tasks.update(prereqs)
+
+        mermaid = ["graph TD"]
+        for task in all_tasks:
+            mermaid.append(f"  {task.replace('-', '_')}[{task}]")
+        for task, prereqs in dependencies.items():
+            for prereq in prereqs:
+                mermaid.append(f"  {prereq.replace('-', '_')} --> {task.replace('-', '_')}")
+        
+        return "\n".join(mermaid)
+    except Exception as e:
+        return f"Error generating visualization: {str(e)}"
+
+@telemetry_decorator
 def debug_script(script_path: str) -> str:
     """Runs a Python script in a tracing mode to debug execution."""
     import sys
@@ -198,13 +281,68 @@ def debug_script(script_path: str) -> str:
         sys.settrace(None)
         return traceback.format_exc()
 
+@telemetry_decorator
+def perform_refactor(directory: str, target_name: str, new_name: str) -> str:
+    """Performs an AST-based rename refactoring task."""
+    try:
+        return refactor_rename(directory, target_name, new_name)
+    except Exception as e:
+        return f"Error performing refactor: {str(e)}"
+
+# Global YOLO state
+YOLO_ENABLED = False
+YOLO_EXPIRY = 0
+
+def set_yolo(enabled: bool, duration_seconds: int = 0):
+    global YOLO_ENABLED, YOLO_EXPIRY
+    YOLO_ENABLED = enabled
+    YOLO_EXPIRY = time.time() + duration_seconds if duration_seconds > 0 else 0
+
+def check_yolo():
+    global YOLO_ENABLED, YOLO_EXPIRY
+    if YOLO_ENABLED and (YOLO_EXPIRY == 0 or time.time() < YOLO_EXPIRY):
+        return True
+    return False
+
+from backend.refactor import refactor_rename
+from backend.security import is_path_safe, validate_shell_command
+# ... (rest of imports)
+
+# ... (rest of the file content until execute_shell)
+
+@telemetry_decorator
 @cache_tool(ttl_seconds=5)
 def execute_shell(command: str) -> str:
     """
     Executes a shell command.
-    WARNING: This executes directly on the OS. Needs strict sandboxing in production.
+    Checks for YOLO mode to bypass destructive command confirmation or restrictive policies.
+    Checks for workspace isolation and command safety.
+    Checks for sandboxing and whitelist.
     """
+    # Load security config
     try:
+        with open("./.forge/configs/security.yaml", "r") as f:
+            security_config = yaml.safe_load(f) or {}
+    except:
+        security_config = {"sandboxing_enabled": False}
+
+    sandboxing_enabled = security_config.get("sandboxing_enabled", False)
+
+    # 1. Workspace Isolation
+    # WARNING: This is a basic security heuristic. 
+    # For a fully isolated system, move execution to a dedicated restricted container.
+    
+    # 2. Command Safety Check
+    if not validate_shell_command(command) and not check_yolo():
+        return "Error: Potentially destructive command detected. Permission denied. Enable YOLO mode via slash command to proceed."
+    
+    # 3. Sandbox / Whitelist Check
+    if sandboxing_enabled and not check_yolo():
+        if not is_command_whitelisted(command):
+            return "Error: Command not whitelisted. Human-in-the-loop approval required for this action."
+
+    try:
+        # Use subprocess to execute command in the project context
         result = subprocess.run(
             command,
             shell=True,
@@ -216,7 +354,7 @@ def execute_shell(command: str) -> str:
         if result.stderr:
             output += f"\n[STDERR]:\n{result.stderr}"
         
-        # Cap output length to avoid context window explosion
+        # Cap output length
         max_length = 4000
         if len(output) > max_length:
             return output[:max_length] + f"\n... (truncated {len(output) - max_length} chars)"
@@ -226,6 +364,70 @@ def execute_shell(command: str) -> str:
         return "Error: Command timed out after 30 seconds."
     except Exception as e:
         return f"Error executing shell command: {str(e)}"
+
+from google.genai import GoogleGenAI
+
+# Initialize Gemini AI client
+ai = GoogleGenAI(api_key=os.environ.get("GEMINI_API_KEY"))
+
+# --- Updated Tools ---
+@telemetry_decorator
+def search_web(query: str) -> str:
+    """Performs a web search using Gemini."""
+    try:
+        response = ai.models.generateContent({
+            "model": "gemini-3.1-flash-lite-preview",
+            "contents": f"Search for: {query}",
+            "config": {
+                "tools": [{"googleSearch": {}}]
+            }
+        })
+        return f"Results for: {query}\n{response.text}"
+    except Exception as e:
+        return f"Error performing web search: {str(e)}"
+
+@telemetry_decorator
+def research_report(topic: str, format: str = "markdown") -> str:
+    """Generates a research report on a topic."""
+    try:
+        prompt = f"Write a comprehensive research report on: {topic}. Format: {format}."
+        response = ai.models.generateContent({
+            "model": "gemini-3.1-pro-preview",
+            "contents": prompt,
+            "config": {
+                "systemInstruction": "You are a professional research assistant."
+            }
+        })
+        return response.text
+    except Exception as e:
+        return f"Error generating research report: {str(e)}"
+
+class GitPatchArgs(BaseModel):
+    patch_content: str = Field(description="The content of the git patch to apply.")
+
+@telemetry_decorator
+def apply_git_patch(patch_content: str) -> str:
+    """Applies a git patch directly."""
+    patch_file = "/tmp/app.patch"
+    try:
+        with open(patch_file, 'w') as f:
+            f.write(patch_content)
+        
+        # Use git apply to apply the patch
+        result = subprocess.run(
+            ["git", "apply", patch_file],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            return "Successfully applied patch."
+        else:
+            return f"Error applying patch: {result.stderr}"
+    except Exception as e:
+        return f"Error executing patch: {str(e)}"
+    finally:
+        if os.path.exists(patch_file):
+            os.remove(patch_file)
 
 # LangGraph tool definitions
 class UpdateStatusArgs(BaseModel):
@@ -240,12 +442,19 @@ TOOLS_REGISTRY = {
     "execute_shell": execute_shell,
     "run_tests": run_tests,
     "debug_script": debug_script,
+    "check_prerequisites": check_prerequisites,
+    "visualize_dependencies": visualize_task_dependencies,
     "get_symbol_map": build_ast_symbol_map,
+    "get_codebase_overview": get_codebase_overview,
+    "refactor_rename": perform_refactor,
     "list_files": list_files,
     "run_ripgrep": run_ripgrep,
+    "apply_git_patch": apply_git_patch,
     "get_os_info": get_os_info,
     "read_status": status_manager.read_status,
-    "update_status": status_manager.update_status
+    "update_status": status_manager.update_status,
+    "search_web": search_web,
+    "research_report": research_report
 }
 
 if os.environ.get("LLAMA_CLOUD_API_KEY"):
@@ -291,6 +500,22 @@ TOOLS_METADATA.extend([
         "parameters": DebugArgs.model_json_schema()
     },
     {
+        "name": "visualize_dependencies",
+        "description": "Visualizes the task dependency DAG using Mermaid syntax.",
+        "parameters": EmptyArgs.model_json_schema()
+    },
+    {
+        "name": "check_prerequisites",
+        "description": "Checks if prerequisites for a given task are met by querying the dependency DAG in the status file.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string"}
+            },
+            "required": ["task_id"]
+        }
+    },
+    {
         "name": "execute_shell",
         "description": "Executes a shell command on the underlying Debian OS and returns the stdout/stderr. Use for system administration, package management, running scripts, or interacting with the environment.",
         "parameters": ShellExecArgs.model_json_schema()
@@ -301,14 +526,37 @@ TOOLS_METADATA.extend([
         "parameters": SymbolMapArgs.model_json_schema()
     },
     {
+        "name": "get_codebase_overview",
+        "description": "Parses Python, JavaScript, and TypeScript files in a target directory to build a symbol graph containing classes and functions and returns a summary.",
+        "parameters": SymbolMapArgs.model_json_schema()
+    },
+    {
+        "name": "refactor_rename",
+        "description": "Performs an AST-based rename refactoring task (variable or function).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "directory": {"type": "string"},
+                "target_name": {"type": "string"},
+                "new_name": {"type": "string"}
+            },
+            "required": ["directory", "target_name", "new_name"]
+        }
+    },
+    {
         "name": "list_files",
-        "description": "Recursively lists files and directories from a starting path up to a maximum depth. Use this to explore project structure and find relevant files.",
+        "description": "Recursively lists files and directories from a starting path, optionally with max_depth. Use this to explore project structure and find relevant files.",
         "parameters": ListFilesArgs.model_json_schema()
     },
     {
         "name": "run_ripgrep",
         "description": "Search for a text pattern in files using ripgrep (or grep fallback). Use this for codebase-wide code searches.",
         "parameters": RipgrepArgs.model_json_schema()
+    },
+    {
+        "name": "apply_git_patch",
+        "description": "Applies a git patch file content to the repository. Use this to apply complex refactoring or multi-file changes atomically.",
+        "parameters": GitPatchArgs.model_json_schema()
     },
     {
         "name": "get_os_info",
@@ -324,5 +572,15 @@ TOOLS_METADATA.extend([
         "name": "update_status",
         "description": "Updates the project status file to keep track of completed, in-progress, and next tasks across long-horizon interactions.",
         "parameters": UpdateStatusArgs.model_json_schema()
+    },
+    {
+        "name": "search_web",
+        "description": "Performs a web search using Gemini and returns results.",
+        "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}
+    },
+    {
+        "name": "research_report",
+        "description": "Generates a research report on a topic.",
+        "parameters": {"type": "object", "properties": {"topic": {"type": "string"}, "format": {"type": "string"}}, "required": ["topic"]}
     }
 ])

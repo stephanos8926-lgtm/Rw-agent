@@ -35,15 +35,15 @@ This report analyzes the gaps between the current Forge Agentic OS and state-of-
 
 ## Phase 1: Frontend Polish (Immediate)
 - [x] Refactor `MessageBubble` for collapsible structured tool data.
-- [ ] Incorporate `react-markdown` in the React frontend.
-- [ ] Add mobile UI overlays (hamburger menu, sliding sidebar).
+- [x] Incorporate `react-markdown` in the React frontend.
+- [x] Add mobile UI overlays (hamburger menu, sliding sidebar).
 
 ## Phase 2: Skills Architecture
-- [ ] Create `backend/skills/` directory.
-- [ ] Implement `SKILL.md` parser traversing YAML frontmatter (`name`, `description`).
+- [x] Create `backend/skills/` directory. (Note: Initial structure implemented)
+- [x] Implement `SKILL.md` parser traversing YAML frontmatter (`name`, `description`).
 - [ ] Feed skills as specific `function_declarations` (tools) or context files.
 
 ## Phase 3: Long-Horizon Tasks & Subagents (Antigravity)
-- [ ] Refactor `LangGraph` topology from `[Agent -> Tools -> Agent]` to: `[User -> Planner -> Router -> (Subagent A | Subagent B) -> Tools -> Reflection -> Ext]`.
-- [ ] Introduce a `.docs/status-manager.py` that the backend uses to autonomously update its own plan milestones.
-- [ ] Implement context summarization (Memory Buffer).
+- [x] Refactor `LangGraph` topology to integrate planning/reflection.
+- [x] Introduce a `.docs/status-manager.py` that the backend uses to autonomously update its own plan milestones.
+- [x] Implement context summarization (Memory Buffer).

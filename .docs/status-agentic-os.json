@@ -1,20 +1,13 @@
 {
+  "project": "agentic-os",
   "completed": [
-    "project-init",
-    "backend-foundation",
-    "frontend-ui",
-    "system-prompt-management",
-    "ast-codegen",
-    "os-level-integration",
-    "context-caching",
-    "document-parsing-integration",
-    "pytest-suite-integration",
-    "agent-reflection-capabilities",
-    "ast-polyglot-enhancements"
+    "integrate-telemetry-service",
+    "observability-plan",
+    "implement-log-rotation",
+    "instrument-agent-modules",
+    "implement-sandbox-workflow"
   ],
   "in_progress": [],
   "blocked": [],
-  "next": [
-    "deploy-to-local-debian"
-  ]
+  "next": []
 }

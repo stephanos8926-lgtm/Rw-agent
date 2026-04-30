@@ -1,0 +1,13 @@
+[project]
+name = "backend"
+version = "0.1.0"
+dependencies = [
+    "uvicorn[standard]",
+    "fastapi",
+    "langgraph",
+    "langgraph-checkpoint-sqlite",
+    "pydantic",
+    "python-dotenv",
+    "pyyaml",
+    "watchdog",
+]
