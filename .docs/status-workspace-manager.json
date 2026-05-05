@@ -3,13 +3,14 @@
     "Workspace Manager Implementation",
     "Config System implementation",
     "Event Bus Implementation",
-    "Lua Plugin System Implementation"
-  ],
-  "in_progress": ["Full System Integration"],
-  "blocked": [],
-  "next": [
+    "Lua Plugin System Implementation",
+    "Plugin Engine Implementation",
+    "Full System Integration",
     "Conflict Resolution Logic",
     "Reliability: Event History logging",
     "Polish: Message Bus adapters"
-  ]
+  ],
+  "in_progress": [],
+  "blocked": [],
+  "next": []
 }

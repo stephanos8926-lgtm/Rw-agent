@@ -5,6 +5,18 @@ import chromadb
 
 CACHE_DIR = "chroma_cache_db"
 
+import logging
+import traceback
+
+# Setup robust logging
+logger = logging.getLogger("SemanticCache")
+logger.setLevel(logging.INFO)
+# Prevent duplicate handlers if module is reloaded
+if not logger.handlers:
+    ch = logging.StreamHandler()
+    ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logger.addHandler(ch)
+
 class SemanticCache:
     """
     A semantic cache utilizing Google Gemini's embedding model to cache LLM 
@@ -34,18 +46,40 @@ class SemanticCache:
             )
             return response.embeddings[0].values
         except Exception as e:
-            print(f"Embedding error: {e}")
+            logger.error(f"Embedding generation error for text length {len(text)}: {e}", exc_info=True)
             return []
 
-    def log_stats(self):
-        print("\n--- Semantic Cache Threshold Experiment Stats ---")
+    def get_hit_rate(self) -> float:
+        hits = self.stats[self.threshold].get("hits", 0) if self.threshold in self.stats else sum(s["hits"] for s in self.stats.values())
+        misses = self.stats[self.threshold].get("misses", 0) if self.threshold in self.stats else sum(s["misses"] for s in self.stats.values())
+        total = hits + misses
+        return hits / total if total > 0 else 0
+
+    def get_stats_summary(self) -> Dict[str, Any]:
+        summary = {"total_hits": 0, "total_misses": 0, "thresholds": {}}
         for t in self.test_thresholds:
-            hits = self.stats[t]["hits"]
-            misses = self.stats[t]["misses"]
-            total = hits + misses
-            rate = (hits / total * 100) if total > 0 else 0
-            print(f"Threshold {t:.2f}: Hits={hits}, Misses={misses}, Hit Rate={rate:.2f}%")
+            hits = self.stats[t].get("hits", 0)
+            misses = self.stats[t].get("misses", 0)
+            summary["thresholds"][str(t)] = {"hits": hits, "misses": misses}
+            if t == self.threshold:
+                summary["total_hits"] = hits
+                summary["total_misses"] = misses
+        summary["hit_rate"] = self.get_hit_rate()
+        return summary
+
+    def log_stats(self) -> Dict[str, Any]:
+        print("\n--- Semantic Cache Threshold Experiment Stats ---")
+        summary = self.get_stats_summary()
+        for k, v in summary.items():
+            if k.startswith("threshold"):
+                print(f"{k}: Hits={v['hits']}, Misses={v['misses']}, Hit Rate={v['hit_rate']*100:.2f}%")
+        print(f"Current active threshold is: {self.threshold}")
         print("------------------------------------------------\n")
+        return summary
+
+    def set_threshold(self, value: float):
+        self.threshold = max(0.0, min(1.0, value))
+        print(f"[Semantic Cache] Threshold dynamically tuned to {self.threshold:.3f}")
 
     def search(self, client, query_text: str, context_hash: str) -> Optional[Dict[str, Any]]:
         """
@@ -63,7 +97,7 @@ class SemanticCache:
                 n_results=1
             )
         except Exception as e:
-            print(f"ChromaDB Query Error: {e}")
+            logger.error(f"ChromaDB Query Error during search: {e}", exc_info=True)
             return None
             
         if not results["distances"] or not len(results["distances"]) or not len(results["distances"][0]):
@@ -83,12 +117,12 @@ class SemanticCache:
         self.log_stats()
 
         if similarity >= self.threshold:
-            print(f"[Semantic Cache HIT] Similarity Score: {similarity:.4f} (Threshold: {self.threshold})")
+            logger.info(f"[Semantic Cache HIT] Similarity Score: {similarity:.4f} (Threshold: {self.threshold})")
             # Since we store JSON in metadata
             response_json = results["metadatas"][0][0].get("response")
             return json.loads(response_json) if response_json else None
 
-        print(f"[Semantic Cache MISS] Best Score: {similarity:.4f} (Threshold: {self.threshold})")
+        logger.info(f"[Semantic Cache MISS] Best Score: {similarity:.4f} (Threshold: {self.threshold})")
         return None
 
     def store(self, client, query_text: str, context_hash: str, response: Dict[str, Any]):
@@ -107,7 +141,7 @@ class SemanticCache:
                 metadatas=[{"response": json.dumps(response)}]
             )
         except Exception as e:
-            print(f"ChromaDB Upsert Error: {e}")
+            logger.error(f"ChromaDB Upsert Error for doc_id {doc_id}: {e}", exc_info=True)
 
 semantic_cache = SemanticCache()
 

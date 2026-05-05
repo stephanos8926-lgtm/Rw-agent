@@ -8,4 +8,4 @@
 ## Milestones
 - [x] Implement `persist_file` and `fetch_file` in `backend/storage.py`.
 - [x] Create database schema migration plan.
-- [ ] Refactor `SqliteSaver` usage to Cloud SQL/Firestore.
+- [x] Refactor `SqliteSaver` usage to Cloud SQL/Firestore (SUPERSEDED by `db-migration-plan.md`).

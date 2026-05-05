@@ -17,13 +17,78 @@ from backend.context_manager import context_manager
 # Simple in-memory cache for tool outputs
 tool_cache = {}
 
+import functools
+import threading
+
 def telemetry_decorator(func):
-    """Decorator to log tool execution telemetry."""
+    """Decorator to log tool execution telemetry with agent context."""
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         start_time = time.time()
-        result = func(*args, **kwargs)
-        trace_tool_execution(func.__name__, {"args": args, "kwargs": kwargs}, start_time)
-        return result
+        agent_id = kwargs.get("agent_id", context_manager.get("active_agent_id") or "system")
+        
+        try:
+            result = func(*args, **kwargs)
+            trace_tool_execution(func.__name__, {"args": args, "kwargs": kwargs}, start_time, agent_id=agent_id)
+            return result
+        except Exception as e:
+            from backend.telemetry import log_error
+            log_error(e, {"tool": func.__name__, "args": args, "kwargs": kwargs}, agent_id=agent_id)
+            raise e
+    return wrapper
+
+def retry_decorator(retries=3, delay=1, backoff=2):
+    """Decorator to retry a function on failure."""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            m_retries, m_delay = retries, delay
+            while m_retries > 1:
+                try:
+                    return func(*args, **kwargs)
+                except Exception:
+                    time.sleep(m_delay)
+                    m_retries -= 1
+                    m_delay *= backoff
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+def timeout_decorator(seconds=30):
+    """Decorator to timeout long-running functions."""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            res = [TimeoutError(f"Execution exceeded {seconds}s")]
+            def target():
+                try:
+                    res[0] = func(*args, **kwargs)
+                except Exception as e:
+                    res[0] = e
+
+            thread = threading.Thread(target=target)
+            thread.start()
+            thread.join(seconds)
+            if thread.is_alive():
+                raise res[0] if isinstance(res[0], Exception) else TimeoutError(f"Execution exceeded {seconds}s")
+            if isinstance(res[0], Exception):
+                raise res[0]
+            return res[0]
+        return wrapper
+    return decorator
+
+def audit_log_decorator(func):
+    """Decorator to log high-sensitivity operations."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        agent_id = kwargs.get("agent_id", context_manager.get("active_agent_id") or "system")
+        log_event("security_audit", {
+            "operation": func.__name__,
+            "args": args,
+            "kwargs": kwargs,
+            "yolo_mode": check_yolo()
+        }, agent_id=agent_id)
+        return func(*args, **kwargs)
     return wrapper
 
 def cache_tool(ttl_seconds=5):
@@ -311,6 +376,8 @@ from backend.security import is_path_safe, validate_shell_command
 # ... (rest of the file content until execute_shell)
 
 @telemetry_decorator
+@audit_log_decorator
+@timeout_decorator(seconds=60)
 @cache_tool(ttl_seconds=5)
 def execute_shell(command: str) -> str:
     """
@@ -372,6 +439,7 @@ ai = GoogleGenAI(api_key=os.environ.get("GEMINI_API_KEY"))
 
 # --- Updated Tools ---
 @telemetry_decorator
+@retry_decorator(retries=2, delay=1)
 def search_web(query: str) -> str:
     """Performs a web search using Gemini."""
     try:

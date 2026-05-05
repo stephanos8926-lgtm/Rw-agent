@@ -6,7 +6,7 @@
 3. Establish structured event log format for analysis.
 
 ## Milestones
-- [ ] Refactor `agent.py` to import `telemetry.py`.
-- [ ] Add `log_event` calls in node functions.
-- [ ] Add `trace_tool_execution` wrapper in `tools.py`.
-- [ ] Test log generation from agent run.
+- [x] Refactor `agent.py` to import `telemetry.py`.
+- [x] Add `log_event` calls in node functions.
+- [x] Add `trace_tool_execution` wrapper in `tools.py`.
+- [x] Test log generation from agent run.

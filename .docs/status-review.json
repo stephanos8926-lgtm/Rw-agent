@@ -1,0 +1,16 @@
+{
+  "project": "Mobile Swarm Command",
+  "audit_version": "1.0.0",
+  "critical_debt": [
+    "Frontend layout lacks touch-target optimization (>44px)",
+    "Backend reflection node doesn't dynamically adjust context depth",
+    "AST Parser lacks cross-file relationship mapping",
+    "Dependency management in backend (requirements.txt) is manual/brittle"
+  ],
+  "milestones": {
+    "1_UX_Foundation": "In Progress",
+    "2_AST_DeepIntegration": "Pending",
+    "3_SelfTuning_Cache": "Pending",
+    "4_MCP_Hardening": "Pending"
+  }
+}

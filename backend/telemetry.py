@@ -9,7 +9,7 @@ from .log_manager import setup_log_rotation
 log_file = os.getenv("TELEMETRY_LOG_FILE", "telemetry.log")
 logger = setup_log_rotation(log_file)
 
-def log_event(event_type: str, details: Dict[str, Any], agent_id: str = "default"):
+def log_event(event_type: str, details: Dict[str, Any], agent_id: str = "system"):
     """Captures a structured event."""
     log_entry = {
         "timestamp": datetime.utcnow().isoformat(),
@@ -19,14 +19,27 @@ def log_event(event_type: str, details: Dict[str, Any], agent_id: str = "default
     }
     logger.info(json.dumps(log_entry))
 
-def trace_tool_execution(tool_name: str, args: Dict[str, Any], start_time: float):
+def log_error(error: Exception, context: Dict[str, Any] = None, agent_id: str = "system"):
+    """Logs a structured error event."""
+    import traceback
+    details = {
+        "error_type": type(error).__name__,
+        "message": str(error),
+        "stack_trace": traceback.format_exc(),
+    }
+    if context:
+        details["context"] = context
+    
+    log_event("system_error", details, agent_id=agent_id)
+
+def trace_tool_execution(tool_name: str, args: Dict[str, Any], start_time: float, agent_id: str = "system"):
     """Traces tool invocation duration."""
     duration = time.time() - start_time
     log_event("tool_execution", {
         "tool_name": tool_name,
         "args": args,
         "duration_seconds": duration
-    })
+    }, agent_id=agent_id)
 
 def init_tracer():
     """Stub for OpenTelemetry initialization."""

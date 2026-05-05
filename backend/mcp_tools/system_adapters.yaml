@@ -1,0 +1,18 @@
+name: open_browser
+description: Opens a headless browser or connects to an existing one via Playwright/Puppeteer adapters.
+parameters:
+  url: string
+
+---
+name: get_calendar_events
+description: Retrieves local calendar events for a specific date via system OS APIs.
+parameters:
+  date: string
+
+---
+name: send_email
+description: Sends an email using the associated user account.
+parameters:
+  to: string
+  subject: string
+  body: string

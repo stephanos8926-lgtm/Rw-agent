@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import argparse
+import time
 
 # Ensure backend module is resolvable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -38,9 +39,45 @@ from backend.ast_parser import build_ast_symbol_map
 from backend.tools import set_yolo
 from backend.mcp_loader import start_mcp_loader
 from backend.telemetry import init_tracer
+from backend.persistence import swarm_persistence
 import os
 
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, status
+from fastapi.responses import JSONResponse
+import logging
+import traceback
+from backend.telemetry import log_event, log_error
+
 app = FastAPI(title="Forge Agentic OS")
+
+# Global Middleware for Request Logging
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    duration = time.time() - start_time
+    
+    log_event("http_request", {
+        "method": request.method,
+        "url": str(request.url),
+        "status_code": response.status_code,
+        "duration": duration
+    })
+    return response
+
+# Global Exception Handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    log_error(exc, {"url": str(request.url)})
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "error": "Internal Server Error",
+            "message": str(exc),
+            "trace": traceback.format_exc() if os.getenv("DEBUG") else None
+        },
+    )
+
 init_tracer()
 
 # Initialize MCP Loader
@@ -50,6 +87,12 @@ mcp_loader = start_mcp_loader(MCP_TOOLS_DIR)
 # Serve static files from the 'dist' directory
 app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
 
+@app.on_event("startup")
+async def startup_event():
+    await message_bus.init_bus()
+    from backend.daemon import agent_daemon
+    agent_daemon.start()
+    
 @app.get("/")
 async def read_index():
     return FileResponse("dist/index.html")
@@ -70,6 +113,10 @@ def get_status():
 def get_skills():
     return {"skills": skills_loader.skills}
 
+@app.get("/api/plugins")
+def get_plugins():
+    return {"plugins": plugin_system.plugins}
+
 @app.get("/api/os-info")
 def get_os_info_route():
     return {"info": get_os_info()}
@@ -83,6 +130,40 @@ def get_ast():
     ast_map = json.loads(build_ast_symbol_map(directory=WORKSPACE_DIR))
     context_manager.set("ast_symbol_map", ast_map)
     return ast_map
+
+@app.get("/api/swarm/audit/{agent_id}")
+def audit_agent(agent_id: str):
+    return {"history": swarm_persistence.get_agent_history(agent_id)}
+
+@app.get("/api/swarm/agents")
+def list_agents():
+    from backend.database import get_db
+    with get_db() as conn:
+        cursor = conn.execute("SELECT * FROM agents ORDER BY created_at DESC")
+        return {"agents": [dict(row) for row in cursor.fetchall()]}
+
+import asyncio
+
+@app.websocket("/ws/events")
+async def events_websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    
+    queue = asyncio.Queue()
+    
+    async def bus_callback(event_type, payload):
+        await queue.put({"type": event_type, "payload": payload})
+        
+    message_bus.subscribe(bus_callback)
+    
+    try:
+        # Send historical events if memory adapter was keeping them, or just listen to new ones
+        while True:
+            event = await queue.get()
+            await websocket.send_json(event)
+    except WebSocketDisconnect:
+        print("Event client disconnected")
+        if bus_callback in message_bus.subscribers:
+            message_bus.subscribers.remove(bus_callback)
 
 @app.websocket("/ws/agent")
 async def websocket_endpoint(websocket: WebSocket):
@@ -123,6 +204,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 elif command == "/status":
                     status = status_manager.read_status()
                     await websocket.send_json({"type": "message", "role": "agent", "content": f"Current Status: {str(status)}"})
+                    continue
+                elif command == "/swarm":
+                    task = " ".join(args)
+                    from backend.swarm_dispatcher import swarm_dispatcher
+                    agent_id = await swarm_dispatcher.spawn_agent(task_instruction=task)
+                    await websocket.send_json({"type": "message", "role": "agent", "content": f"Sub-agent spawned with ID {agent_id}. Watch the Swarm Observer tab for progress."})
                     continue
 
             # Stream user message back to UI

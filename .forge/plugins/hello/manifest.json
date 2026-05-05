@@ -1,0 +1,5 @@
+{
+  "name": "hello_lua",
+  "version": "1.0.0",
+  "entry": "plugin.lua"
+}

@@ -7,20 +7,20 @@ Implement a robust workspace manager, hot-reloadable configuration system, messa
 
 ### Phase 1: Infrastructure & Core Utilities
 - [x] Workspace Manager (Basic Impl)
-- [ ] Requirements Update (`aiosqlite`, `watchdog`, `lupa`)
-- [ ] Message Bus: SQLite-based async event dispatcher
-- [ ] Config Manager: Filesystem watcher + Loader (JSON/YAML)
+- [x] Requirements Update (`aiosqlite`, `watchdog`, `lupa`)
+- [x] Message Bus: SQLite-based async event dispatcher
+- [x] Config Manager: Filesystem watcher + Loader (JSON/YAML)
 
 ### Phase 2: Plugin Engine & Integration
-- [ ] Plugin Engine: Lua integration with `lupa` + Plugin Manifest parsing
-- [ ] Plugin Loader: Registry and dynamic tool exposure to AI
-- [ ] Integration: Wire everything into the `server.py` lifecycle
+- [x] Plugin Engine: Lua integration with `lupa` + Plugin Manifest parsing
+- [x] Plugin Loader: Registry and dynamic tool exposure to AI
+- [x] Integration: Wire everything into the `server.py` lifecycle
 
 ### Phase 3: Conflict Resolution & Reliability
-- [ ] Conflict Resolution: Weight-based logic (Base < Workspace < Task < User)
-- [ ] Reliability: Extensive logging, sqlite-based persistent event history
-- [ ] Polish: High-performance async event bus with multiple adapters
+- [x] Conflict Resolution: Weight-based logic (Base < Workspace < Task < User)
+- [x] Reliability: Extensive logging, sqlite-based persistent event history
+- [x] Polish: High-performance async event bus with multiple adapters
 
 ## Status
-- `in_progress`: Full System Integration
-- `next`: Plugin Engine Implementation
+- `in_progress`: []
+- `next`: []
