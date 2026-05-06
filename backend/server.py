@@ -131,6 +131,10 @@ def get_ast():
     context_manager.set("ast_symbol_map", ast_map)
     return ast_map
 
+@app.get("/api/ast/usages/{symbol_name}")
+def get_symbol_usages(symbol_name: str):
+    return {"usages": workspace_manager.get_symbol_usages(symbol_name)}
+
 @app.get("/api/swarm/audit/{agent_id}")
 def audit_agent(agent_id: str):
     return {"history": swarm_persistence.get_agent_history(agent_id)}

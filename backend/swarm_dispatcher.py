@@ -25,6 +25,9 @@ class SwarmDispatcher:
         self.active_tasks[agent_id] = task
         return agent_id
         
+    def get_active_agents(self):
+        return list(self.active_tasks.keys())
+        
     async def _run_detached_agent(self, agent_id: str, instruction: str, role: str):
         swarm_persistence.log_event(agent_id, "transition", {"new_status": "active"})
         message_bus.publish("task_started", {
@@ -38,6 +41,12 @@ class SwarmDispatcher:
             
             for i, step in enumerate(steps):
                 await asyncio.sleep(3) # Simulate work time
+                # Example: Simulate a specific error if step is "Drafting plan..."
+                if step == "Drafting plan...":
+                    # For demo purposes, we can raise a hypothetical custom exception
+                    # raise ValueError("Plan drafting failed")
+                    pass
+                
                 swarm_persistence.log_event(agent_id, "progress", {"step": step, "index": i+1})
                 message_bus.publish("task_progress", {
                     "agent_id": agent_id,
@@ -52,8 +61,19 @@ class SwarmDispatcher:
                 "role": role
             })
             
+        except ValueError as ve:
+            # Handle specific expected errors (e.g. invalid plan)
+            swarm_persistence.log_event(agent_id, "error", {"message": f"Validation Error: {str(ve)}"})
+            swarm_persistence.log_event(agent_id, "transition", {"new_status": "failed"})
+            message_bus.publish("task_error", {
+                "agent_id": agent_id,
+                "error": str(ve),
+                "type": "validation_error",
+                "role": role
+            })
         except Exception as e:
-            swarm_persistence.log_event(agent_id, "error", {"message": str(e)})
+            # Handle unexpected errors
+            swarm_persistence.log_event(agent_id, "error", {"message": f"Unexpected Error: {str(e)}"})
             swarm_persistence.log_event(agent_id, "transition", {"new_status": "failed"})
             message_bus.publish("task_error", {
                 "agent_id": agent_id,

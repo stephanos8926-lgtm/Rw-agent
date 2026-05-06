@@ -1,0 +1,12 @@
+{
+  "project": "ast-relationship-mapping",
+  "completed": [
+    "research-tree-sitter-capabilities",
+    "extend-ast-parser",
+    "create-symbol-registry",
+    "ui-integration"
+  ],
+  "in_progress": [],
+  "blocked": [],
+  "next": []
+}

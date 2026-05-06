@@ -1,0 +1,12 @@
+{
+  "completed": [
+    "ast-planner-node-enhancement",
+    "sidebar-ast-integration",
+    "mobile-command-bar-refactor",
+    "phase-4-verification",
+    "final-build-verification"
+  ],
+  "in_progress": [],
+  "blocked": [],
+  "next": []
+}

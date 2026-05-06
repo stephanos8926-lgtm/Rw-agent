@@ -1,11 +1,13 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useAgent, ChatMessage } from './hooks/useAgent';
+import { ConversationBrowser } from './components/ConversationBrowser';
+import { MiniTerminal } from './components/MiniTerminal';
 import { WorkspaceSidebar } from './components/WorkspaceSidebar';
 import { SystemInfoModal } from './components/SystemInfoModal';
 import { SwarmObserver } from './components/SwarmObserver';
 import { MobileCommandBar } from './components/MobileCommandBar';
 import { TypewriterMarkdown } from './components/TypewriterMarkdown';
-import { Terminal, Send, Power, Code2, Cpu, Wrench, ChevronDown, ChevronRight, FileJson, Menu, X, Copy, Play, Info, Activity, BookOpen, AlertTriangle, Zap, Check, Maximize2, Minimize2 } from 'lucide-react';
+import { Terminal, Send, Power, Code2, Cpu, Wrench, ChevronDown, ChevronRight, FileJson, Menu, X, Copy, Play, Info, Activity, BookOpen, AlertTriangle, Zap, Check, Maximize2, Minimize2, GitBranch, ArrowDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import 'highlight.js/styles/github-dark.css';
 
@@ -17,75 +19,58 @@ export default function App() {
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
   const [status, setStatus] = useState<any>(null);
   const [viewMode, setViewMode] = useState<'chat' | 'swarm'>('chat');
+  const [showHistory, setShowHistory] = useState(false);
   const [activeTask, setActiveTask] = useState<string | null>(null);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [skills, setSkills] = useState<any[]>([]);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
+  
   const [skillFilter, setSkillFilter] = useState('');
   const [astData, setAstData] = useState<any>(null);
+  const [astError, setAstError] = useState<string | null>(null);
   const [isSystemInfoOpen, setIsSystemInfoOpen] = useState(false);
   const [systemDiagnostics, setSystemDiagnostics] = useState<{ type: 'error' | 'warning' | 'info', message: string }[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  
-  // Shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setShowCommandPalette(prev => !prev);
-      }
-      if (e.key === 'Escape') {
-        setShowCommandPalette(false);
-        setSidebarOpen(false);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-  
-  // Data Fetching Pollers
-  useEffect(() => {
-    const fetchMeta = async () => {
-      try {
-        const [statusRes, skillsRes, astRes] = await Promise.all([
-          fetch('/api/status'),
-          fetch('/api/skills'),
-          fetch('/api/ast')
-        ]);
-        
-        const statusData = await statusRes.json();
-        const skillsData = await skillsRes.json();
-        const astData = await astRes.json();
-        
-        setStatus(statusData);
-        setSkills(skillsData.skills || []);
-        setAstData(astData);
-        
-        // Check for diagnostics in result if they come from the message bus or previous messages
-        // Here we'll just check if lsp errors exist in a dedicated field or parsed from messages
-        if (statusData.errors) {
-            setSystemDiagnostics([{ type: 'error', message: 'LSP Diagnostics Active' }]);
-        } else {
-            setSystemDiagnostics([]);
-        }
-        
-        // Update active task if in progress
-        if (statusData.in_progress?.length > 0) {
-          setActiveTask(statusData.in_progress[0]);
-        } else {
-          setActiveTask(null);
-        }
-      } catch (err) {
-        console.error("Meta poll failed:", err);
-      }
-    };
 
-    fetchMeta();
-    const interval = setInterval(fetchMeta, 5000);
-    return () => clearInterval(interval);
-  }, []);
-  
   // Connect to the local FastAPI server
-  const { messages, isConnected, isTyping, sendMessage, clearHistory } = useAgent('/ws/agent');
+  const { messages, isConnected, isTyping, sendMessage, clearHistory, revertToMessage } = useAgent('/ws/agent');
+
+  // Data Fetching for AST
+  const fetchAst = useCallback(async () => {
+    setAstError(null);
+    try {
+      const response = await fetch('/api/ast');
+      if (!response.ok) throw new Error('Could not index codebase: System unreachable.');
+      const data = await response.json();
+      setAstData(data);
+      setAstError(null);
+    } catch (err) {
+      console.error("AST fetch failed:", err);
+      setAstError(err instanceof Error ? err.message : 'Database index error');
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAst();
+  }, [fetchAst]);
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTo({
+        top: chatScrollRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
+  }, [messages]);
+
+  const handleChatScroll = () => {
+    if (chatScrollRef.current) {
+        const { scrollTop, scrollHeight, clientHeight } = chatScrollRef.current;
+        setShowScrollBottom(scrollHeight - scrollTop - clientHeight > 100);
+    }
+  };
 
   // Global Error Listeners
   useEffect(() => {
@@ -207,6 +192,8 @@ export default function App() {
           skillFilter={skillFilter}
           onSkillFilterChange={setSkillFilter}
           astData={astData}
+          astError={astError}
+          onRetryAst={fetchAst}
           onExport={exportChat}
           onImport={importChat}
           onOpenSystemInfo={() => setIsSystemInfoOpen(true)}
@@ -357,7 +344,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* Forge HUD Overlay */}
-      <div className="fixed bottom-6 right-6 z-[60] flex flex-col items-end gap-3 pointer-events-none">
+      <div className="fixed bottom-6 right-6 z-[60] flex flex-col items-end gap-3 pointer-events-none max-w-[calc(100vw-3rem)]">
         <AnimatePresence>
           {systemDiagnostics.map((diag, i) => (
             <motion.div 
@@ -368,13 +355,13 @@ export default function App() {
               className={`px-4 py-2 rounded-xl border flex items-center gap-3 backdrop-blur-xl shadow-2xl pointer-events-auto ${diag.type === 'error' ? 'bg-red-500/10 border-red-500/30 text-red-400' : 'bg-amber-500/10 border-amber-500/30 text-amber-400'}`}
             >
               <AlertTriangle size={14} className="animate-pulse" />
-              <span className="text-[10px] font-bold uppercase tracking-widest">{diag.message}</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest truncate">{diag.message}</span>
               <button className="hover:text-white" onClick={() => setSystemDiagnostics([])}><X size={12} /></button>
             </motion.div>
           ))}
         </AnimatePresence>
 
-        <div className="bg-slate-950/80 backdrop-blur-2xl border border-slate-800 p-3 rounded-2xl flex items-center gap-6 shadow-2xl pointer-events-auto select-none">
+        <div className="bg-slate-950/80 backdrop-blur-2xl border border-slate-800 p-3 rounded-2xl flex items-center gap-4 shadow-2xl pointer-events-auto select-none sm:gap-6">
            <div className="flex flex-col gap-1">
               <div className="text-[8px] text-slate-600 uppercase tracking-tighter">Neural Stream</div>
               <div className="flex items-center gap-2">
@@ -392,9 +379,9 @@ export default function App() {
               </div>
            </div>
 
-           <div className="w-px h-8 bg-slate-800" />
+           <div className="w-px h-8 bg-slate-800 hidden sm:block" />
 
-           <div className="flex flex-col gap-1">
+           <div className="flex flex-col gap-1 hidden sm:flex">
               <div className="text-[8px] text-slate-600 uppercase tracking-tighter">Memory Latency</div>
               <div className="flex items-center gap-2">
                  <Zap size={12} className={isConnected ? 'text-amber-500' : 'text-slate-700'} />
@@ -402,7 +389,7 @@ export default function App() {
               </div>
            </div>
 
-           <div className="w-px h-8 bg-slate-800" />
+           <div className="w-px h-8 bg-slate-800 hidden sm:block" />
 
            <div className="flex flex-col gap-1">
               <div className="text-[8px] text-slate-600 uppercase tracking-tighter">Forge Heartbeat</div>
@@ -418,7 +405,7 @@ export default function App() {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-screen min-w-0 relative">
+      <div className="flex-1 flex flex-col h-full min-w-0 relative">
         
         {/* Background Grid */}
         <div className="absolute inset-0 grid-bg opacity-10 pointer-events-none" />
@@ -442,6 +429,13 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-4">
+            <button 
+                onClick={() => setShowHistory(!showHistory)}
+                className={`p-2 rounded-lg transition-colors ${showHistory ? 'bg-cyan-900/50 text-cyan-400' : 'text-slate-500 hover:text-slate-300'}`}
+                title="Toggle Conversation History"
+              >
+                <GitBranch size={16} />
+              </button>
             <div className="hidden md:flex items-center gap-4 text-[10px] font-mono">
               <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-900/50 rounded border border-slate-800">
                 <span className="text-slate-600">LSP</span>
@@ -458,9 +452,20 @@ export default function App() {
         </header>
 
         {viewMode === 'chat' ? (
-          <>
-            {/* Main Terminal Area */}
-            <main className="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar relative z-10">
+          <div className="flex-1 flex overflow-hidden">
+            <main 
+              ref={chatScrollRef}
+              onScroll={handleChatScroll}
+              className="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar relative z-10"
+            >
+              {showScrollBottom && (
+                <button
+                  onClick={() => chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: 'smooth' })}
+                  className="fixed bottom-24 right-8 z-50 p-2 bg-slate-800 rounded-full text-slate-300 hover:bg-slate-700 shadow-xl border border-slate-700"
+                >
+                  <ArrowDown size={16} />
+                </button>
+              )}
               <div className="max-w-4xl mx-auto space-y-6 pb-24">
                 {messages.length === 0 && (
                   <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-4">
@@ -488,6 +493,14 @@ export default function App() {
               </div>
             </main>
 
+            {showHistory && (
+              <ConversationBrowser 
+                messages={messages} 
+                onRevert={(id) => revertToMessage(id)} 
+                onBranch={(id) => console.log('Branch:', id)} 
+              />
+            )}
+            
             <div className="absolute bottom-0 inset-x-0 p-4 md:p-8 z-30 pointer-events-none">
               <form 
                 onSubmit={handleSubmit} 
@@ -525,7 +538,7 @@ export default function App() {
                 </div>
               </form>
             </div>
-          </>
+          </div>
         ) : (
           <main className="flex-1 overflow-hidden relative">
             <SwarmObserver />
@@ -612,29 +625,11 @@ const MessageBubble: React.FC<{ message: ChatMessage }> = ({ message }) => {
       <div className={`relative p-3 sm:p-4 rounded-2xl border transition-all ${config.bubble}`}>
         {message.role === 'agent' ? (
           <TypewriterMarkdown content={message.content} className="text-sm sm:text-base" />
+        ) : message.role === 'tool_result' ? (
+            <MiniTerminal content={message.content} onExpand={() => console.log('Expand terminal')} />
         ) : (
           <div className="text-sm sm:text-base whitespace-pre-wrap leading-relaxed">
-            {message.content.length > 500 && !isExpanded && message.role === 'tool_result' ? (
-              <>
-                {message.content.slice(0, 500)}...
-                <button 
-                  onClick={() => setIsExpanded(true)}
-                  className="block mt-2 text-cyan-500 hover:underline font-bold"
-                >
-                  EXPAND OUTPUT
-                </button>
-              </>
-            ) : (
-              message.content
-            )}
-            {isExpanded && (
-               <button 
-                onClick={() => setIsExpanded(false)}
-                className="mt-4 text-slate-500 hover:text-slate-300 flex items-center gap-1"
-              >
-                <Minimize2 size={12} /> Hide
-              </button>
-            )}
+            {message.content}
           </div>
         )}
 

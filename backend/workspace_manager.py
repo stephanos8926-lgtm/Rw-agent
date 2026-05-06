@@ -6,6 +6,27 @@ class WorkspaceManager:
     def __init__(self, base_dir):
         self.base_dir = base_dir
         self.current_workspace = "."
+        self.symbol_registry = {}
+        self.usage_index = {} # symbol_name -> list of (file_path, line)
+
+    def update_symbol_registry(self, file_path, symbols):
+        self.symbol_registry[file_path] = symbols
+        # Also build usage index: for now, let's index calls
+        for call in symbols.get("calls", []):
+            symbol = call["name"]
+            if symbol not in self.usage_index:
+                self.usage_index[symbol] = []
+            self.usage_index[symbol].append((file_path, call["line"]))
+
+    def get_symbol_registry(self):
+        return self.symbol_registry
+    
+    def get_symbol_usages(self, symbol_name):
+        return self.usage_index.get(symbol_name, [])
+    
+    def clear_symbol_registry(self):
+        self.symbol_registry = {}
+        self.usage_index = {}
 
     def set_workspace(self, workspace_name):
         workspace_path = os.path.join(self.base_dir, workspace_name)

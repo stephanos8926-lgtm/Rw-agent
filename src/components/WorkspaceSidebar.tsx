@@ -37,6 +37,8 @@ interface WorkspaceSidebarProps {
   skillFilter: string;
   onSkillFilterChange: (val: string) => void;
   astData: any;
+  astError?: string | null;
+  onRetryAst: () => void;
   onExport: () => void;
   onImport: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onOpenSystemInfo: () => void;
@@ -56,6 +58,8 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
   skillFilter,
   onSkillFilterChange,
   astData,
+  astError,
+  onRetryAst,
   onExport,
   onImport,
   onOpenSystemInfo,
@@ -63,7 +67,39 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
   onReset,
   isConnected
 }) => {
-  const filteredSkills = skills.filter(s => s.frontmatter.name.toLowerCase().includes(skillFilter.toLowerCase()));
+  const [symbolFilter, setSymbolFilter] = React.useState('');
+  const [selectedSymbol, setSelectedSymbol] = React.useState<string | null>(null);
+  const [symbolUsages, setSymbolUsages] = React.useState<any[]>([]);
+  
+  const filteredSkills = React.useMemo(() => 
+    skills.filter(s => s.frontmatter.name.toLowerCase().includes(skillFilter.toLowerCase())), 
+    [skills, skillFilter]
+  );
+
+  const filteredAst = React.useMemo(() => {
+    if (!astData) return {};
+    const filtered: any = {};
+    Object.entries(astData).forEach(([path, sym]: [any, any]) => {
+      const fns = sym.functions?.filter((f: any) => f.name.toLowerCase().includes(symbolFilter.toLowerCase())) || [];
+      const classes = sym.classes?.filter((c: any) => c.name.toLowerCase().includes(symbolFilter.toLowerCase())) || [];
+      if (fns.length > 0 || classes.length > 0) {
+        filtered[path] = { functions: fns, classes: classes };
+      }
+    });
+    return filtered;
+  }, [astData, symbolFilter]);
+
+  const handleSelectSymbol = async (symbolName: string) => {
+    setSelectedSymbol(symbolName);
+    try {
+      const response = await fetch(`/api/ast/usages/${symbolName}`);
+      const data = await response.json();
+      setSymbolUsages(data.usages || []);
+    } catch (e) {
+      console.error("Failed to fetch usages", e);
+      setSymbolUsages([]);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full overflow-hidden text-slate-400">
@@ -146,30 +182,13 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
           </div>
         )}
 
-        {/* Workspaces Section */}
+        {/* Agent Registry */}
         <div className="px-4 py-6 border-b border-slate-800/30">
-          <div className="flex items-center justify-between mb-4 px-2">
-            <h3 className="text-[11px] uppercase tracking-widest text-slate-500 font-bold flex items-center gap-2">
-              <Folder size={14} /> Workspaces
-            </h3>
-            <button className="p-1.5 hover:bg-slate-800 rounded text-slate-600 hover:text-cyan-400 transition-colors">
-              <Plus size={16} />
-            </button>
-          </div>
-          <div className="space-y-1.5">
-            {workspaces.map((ws) => (
-              <button
-                key={ws.id}
-                onClick={() => onSelect(ws.id)}
-                className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm transition-all group ${currentWorkspace === ws.id ? 'bg-slate-800 text-slate-200 border border-slate-700 shadow-md' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-900/50'}`}
-              >
-                <div className="flex items-center gap-3">
-                  <Layout size={16} className={currentWorkspace === ws.id ? 'text-cyan-400' : 'text-slate-600'} />
-                  <span className="font-medium tracking-tight">{ws.name}</span>
-                </div>
-                <ChevronRight size={14} className={`transition-transform ${currentWorkspace === ws.id ? 'rotate-90 opacity-100' : 'opacity-0'}`} />
-              </button>
-            ))}
+          <h3 className="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-bold mb-4 px-2 flex items-center gap-2">
+            <Cpu size={12} /> Agent Registry
+          </h3>
+          <div className="space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar px-1">
+            {/* Will fetch and map agents here */}
           </div>
         </div>
 
@@ -205,21 +224,69 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
           <h3 className="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-bold mb-4 px-2 flex items-center gap-2">
             <Database size={12} /> Project Index
           </h3>
-          <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar px-2">
-            {astData && Object.entries(astData).map(([path, symbols]: [any, any]) => (
-                <div key={path} className="group">
-                    <div className="text-[10px] font-bold text-slate-400 truncate mb-1 hover:text-cyan-400 transition-colors cursor-pointer">{path.split('/').pop()}</div>
-                    <div className="ml-2 border-l border-slate-800 pl-2 space-y-0.5">
-                        {symbols.functions && symbols.functions.map((fn: any) => (
-                          <div key={fn.name} className="text-[9px] text-slate-600 truncate flex items-center gap-1.5">
-                            <span className="text-amber-500/50">fn</span> {fn.name}
-                          </div>
-                        ))}
-                    </div>
-                </div>
-            ))}
-            {!astData && <div className="text-[10px] text-slate-600 italic">Indexing codebase...</div>}
+          <div className="relative mb-4 flex items-center">
+            <input 
+              type="text" 
+              placeholder="Search symbols..." 
+              value={symbolFilter} 
+              onChange={(e) => setSymbolFilter(e.target.value)}
+              className="w-full bg-slate-950/50 border border-slate-800 rounded-xl py-2.5 pl-4 pr-10 text-xs focus:outline-none focus:border-cyan-500/50 transition-all"
+            />
+            <div className="absolute right-4 text-slate-700">
+               <Search size={14} />
+            </div>
           </div>
+          
+          {astError ? (
+            <div className="px-2 py-3 mb-4 rounded-xl bg-red-950/30 border border-red-900/50 text-[10px] text-red-400 flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <ShieldAlert size={14} />
+                <span>{astError}</span>
+              </div>
+              <button 
+                onClick={onRetryAst}
+                className="w-full py-1.5 rounded-lg bg-red-900/50 hover:bg-red-900 text-white font-bold transition-all"
+              >
+                Retry Load
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar px-2">
+              {Object.entries(filteredAst).map(([path, symbols]: [any, any]) => (
+                  <div key={path} className="group">
+                      <div className="text-[10px] font-bold text-slate-400 truncate mb-1 hover:text-cyan-400 transition-colors cursor-pointer">{path.split('/').pop()}</div>
+                      <div className="ml-2 border-l border-slate-800 pl-2 space-y-0.5">
+                          {symbols.functions && symbols.functions.map((fn: any) => (
+                            <div 
+                              key={fn.name} 
+                              onClick={() => handleSelectSymbol(fn.name)}
+                              className={`text-[9px] truncate flex items-center gap-1.5 cursor-pointer ${selectedSymbol === fn.name ? 'text-cyan-400' : 'text-slate-600 hover:text-slate-400'}`}
+                            >
+                              <span className="text-amber-500/50">fn</span> {fn.name}
+                            </div>
+                          ))}
+                      </div>
+                  </div>
+              ))}
+              
+              {selectedSymbol && (
+                 <div className="mt-4 pt-4 border-t border-slate-800">
+                    <h4 className="text-[10px] font-bold text-slate-300 mb-2">Usages of {selectedSymbol}:</h4>
+                    {symbolUsages.length > 0 ? (
+                      <div className="space-y-1">
+                        {symbolUsages.map(([path, line]: [string, number], i) => (
+                          <div key={i} className="text-[9px] text-slate-500 font-mono truncate">
+                            {path.split('/').pop()}:{line}
+                          </div>
+                      ))}
+                      </div>
+                    ) : <div className="text-[9px] text-slate-600 italic">No usages found</div>}
+                 </div>
+              )}
+              
+              {Object.keys(filteredAst).length === 0 && <div className="text-[10px] text-slate-600 italic">No symbols found...</div>}
+            </div>
+          )}
         </div>
       </div>
       

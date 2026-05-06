@@ -1,15 +1,23 @@
 import React from 'react';
 import { useSwarmEvents } from '../hooks/useSwarmEvents';
 import { motion, AnimatePresence } from 'motion/react';
-import { Activity, Cpu, Code2, AlertTriangle, CheckCircle, Clock, Info, Terminal } from 'lucide-react';
+import { Activity, Cpu, Code2, AlertTriangle, CheckCircle, Clock, Info, Terminal, X } from 'lucide-react';
 
 export const SwarmObserver: React.FC = () => {
   const { events } = useSwarmEvents('/ws/events');
   const [isCondensed, setIsCondensed] = React.useState(window.innerWidth < 768);
   const [persistentAgents, setPersistentAgents] = React.useState<any[]>([]);
+  const [unhealthyAgentIds, setUnhealthyAgentIds] = React.useState<string[]>([]);
   const [selectedAgentId, setSelectedAgentId] = React.useState<string | null>(null);
   const [auditLog, setAuditLog] = React.useState<any[]>([]);
   const [isAuditing, setIsAuditing] = React.useState(false);
+
+  React.useEffect(() => {
+    const healthEvent = events.find(e => e.type === 'agent_health_alert');
+    if (healthEvent) {
+        setUnhealthyAgentIds(healthEvent.payload.unhealthy_agents);
+    }
+  }, [events]);
 
   React.useEffect(() => {
     const handleResize = () => setIsCondensed(window.innerWidth < 768);
@@ -214,14 +222,14 @@ export const SwarmObserver: React.FC = () => {
           </div>
         )}
 
-        {/* Live Stream */}
+          {/* Live Stream */}
         <div className={`${isCondensed ? 'col-span-1' : 'lg:col-span-3'} flex flex-col overflow-hidden`}>
           {!isCondensed && (
-            <div className="flex items-center justify-between px-2 mb-2">
-              <span className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-2">
-                <Terminal size={12} /> Sequence_Log
+            <div className="flex items-center justify-between px-2 mb-4">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                <Terminal size={14} /> Sequence_Log
               </span>
-              <span className="text-[9px] text-slate-700">Last 50 cycles</span>
+              <span className="text-[10px] text-slate-600 tracking-wider">LATEST_50_CYCLES</span>
             </div>
           )}
           
@@ -237,7 +245,7 @@ export const SwarmObserver: React.FC = () => {
                 >
                   <div className="flex justify-between items-center w-full">
                     <div className="flex items-center gap-3">
-                      <div className={`rounded-md bg-slate-950/50 border border-slate-800 ${isCondensed ? 'p-1' : 'p-1.5'}`}>
+                      <div className={`rounded-md bg-slate-950/50 border border-slate-800 ${isCondensed ? 'p-1' : 'p-2'}`}>
                         {getEventIcon(evt.type)}
                       </div>
                       <div>
@@ -258,9 +266,12 @@ export const SwarmObserver: React.FC = () => {
                   </div>
                   
                   {!isCondensed && (
-                    <div className="text-[11px] text-cyan-400/70 bg-slate-950/40 p-3 rounded border border-slate-900 overflow-x-auto custom-scrollbar font-mono">
-                      <pre>{JSON.stringify(evt.payload, null, 2)}</pre>
-                    </div>
+                    <details className="mt-2">
+                      <summary className="text-[10px] text-slate-600 uppercase tracking-widest cursor-pointer hover:text-cyan-400">View Payload</summary>
+                      <div className="text-[12px] text-cyan-400/70 bg-slate-950/40 p-3 mt-2 rounded-xl border border-slate-800 overflow-x-auto custom-scrollbar font-mono">
+                        <pre className="whitespace-pre-wrap">{JSON.stringify(evt.payload, null, 2)}</pre>
+                      </div>
+                    </details>
                   )}
                 </motion.div>
               ))}

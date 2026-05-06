@@ -28,6 +28,17 @@ class AgentDaemon:
                 message_bus.publish("daemon_trigger", {"action": "background_maintenance"})
                 await swarm_dispatcher.spawn_agent("Perform routine system cleanup and summarize recent activity logs.", role="maintenance")
                 
+                # Health Check: report agents that finished with errors
+                active_agents = swarm_dispatcher.get_active_agents()
+                unhealthy = []
+                for agent_id in active_agents:
+                    task = swarm_dispatcher.active_tasks.get(agent_id)
+                    if task and task.done() and task.exception():
+                        unhealthy.append(agent_id)
+                
+                if unhealthy:
+                    message_bus.publish("agent_health_alert", {"unhealthy_agents": unhealthy})
+                
                 # Wait for next interval
                 await asyncio.sleep(self.interval_seconds)
             except asyncio.CancelledError:

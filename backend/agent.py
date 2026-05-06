@@ -232,13 +232,28 @@ def build_graph():
 
 def planner_node(state: AgentState):
     """Generates a sub-task plan for long-horizon goals."""
-    # Simple planner logic: Generate a plan based on the last message and current status
     messages = state["messages"]
     latest_request = messages[-1].get("content", "No request provided") if messages else "No request"
     status = read_status()
     
-    # In a real system, we'd use the LLM to generate the plan
-    plan = f"Plan for '{latest_request[:30]}...':\nStatus: {status[:50]}...\n1. Analyze requirements\n2. Break into sub-tasks\n3. Execute iteratively\n4. Review and Refine"
+    # Use LLM to generate a detailed plan
+    planning_prompt = f"""You are a Task Planner. Your goal is to break down the user request into a clear, numbered list of actionable sub-tasks.
+    
+    User Request: {latest_request}
+    Current Project Status: {status}
+    
+    Return a concise numbered list of sub-tasks.
+    """
+    
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=planning_prompt
+        )
+        plan = response.text
+    except Exception as e:
+        print(f"Planning failed: {e}")
+        plan = f"Plan for '{latest_request[:30]}...':\nStatus: {status[:50]}...\n1. Analyze requirements\n2. Break into sub-tasks\n3. Execute iteratively\n4. Review and Refine"
     
     return {"current_plan": plan}
 

@@ -8,6 +8,7 @@ export interface ChatMessage {
   content: string;
   timestamp: Date;
   tool?: string;
+  isToolAction?: boolean;
 }
 
 export function useAgent(wsUrl: string = 'ws://localhost:8000/ws/agent') {
@@ -34,12 +35,14 @@ export function useAgent(wsUrl: string = 'ws://localhost:8000/ws/agent') {
         const data = JSON.parse(event.data);
         setIsTyping(false);
 
+        const isTool = data.type === 'tool_intent' || data.type === 'tool_result';
         const newMessage: ChatMessage = {
           id: Date.now().toString() + Math.random(),
           role: data.role || data.type,
           content: data.content,
           timestamp: new Date(),
-          tool: data.tool
+          tool: data.tool,
+          isToolAction: isTool
         };
 
         if (data.type === 'tool_intent' || data.type === 'tool_result') {
@@ -99,5 +102,13 @@ export function useAgent(wsUrl: string = 'ws://localhost:8000/ws/agent') {
 
   const clearHistory = () => setMessages([]);
 
-  return { messages, isConnected, isTyping, sendMessage, clearHistory };
+  const revertToMessage = useCallback((messageId: string) => {
+    setMessages(prev => {
+        const index = prev.findIndex(m => m.id === messageId);
+        if (index === -1) return prev;
+        return prev.slice(0, index + 1);
+    });
+  }, []);
+
+  return { messages, isConnected, isTyping, sendMessage, clearHistory, revertToMessage };
 }

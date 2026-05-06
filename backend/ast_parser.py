@@ -3,6 +3,7 @@ from tree_sitter import Language, Parser
 import tree_sitter_python as tspython
 import tree_sitter_javascript as tsjavascript
 import tree_sitter_typescript as tstypescript
+from workspace_manager import workspace_manager
 from typing import Dict, List, Any, Optional
 
 # Pre-compile languages
@@ -27,12 +28,17 @@ class ASTMapper:
                 (class_definition name: (identifier) @class)
                 (function_definition name: (identifier) @function)
                 (assignment left: (identifier) @variable)
+                (import_from_statement module_name: (dotted_name) @import)
+                (import_statement name: (dotted_name) @import)
+                (call function: (identifier) @call)
             """),
             ".js": JS_LANGUAGE.query("""
                 (class_declaration name: (identifier) @class)
                 (function_declaration name: (identifier) @function)
                 (method_definition name: (property_identifier) @function)
                 (variable_declarator name: (identifier) @variable)
+                (import_declaration source: (string) @import)
+                (call_expression function: (identifier) @call)
             """),
             ".ts": TS_LANGUAGE.query("""
                 (class_declaration name: (identifier) @class)
@@ -40,6 +46,11 @@ class ASTMapper:
                 (method_declaration name: (property_identifier) @function)
                 (interface_declaration name: (identifier) @interface)
                 (type_alias_declaration name: (identifier) @type)
+                (generic_type name: (identifier) @type)
+                (union_type) @type
+                (mapped_type_clause) @type
+                (import_declaration source: (string) @import)
+                (call_expression function: (identifier) @call)
             """)
         }
         self.symbol_index = {}
@@ -58,7 +69,7 @@ class ASTMapper:
                 tree = parser.parse(content)
                 
             captures = query.captures(tree.root_node)
-            symbols = {"classes": [], "functions": [], "interfaces": [], "types": [], "variables": []}
+            symbols = {"classes": [], "functions": [], "interfaces": [], "types": [], "variables": [], "imports": [], "calls": []}
             
             for node, name in captures:
                 symbol_name = node.text.decode('utf-8')
@@ -69,8 +80,11 @@ class ASTMapper:
                 elif name == "interface": symbols["interfaces"].append({"name": symbol_name, "line": line})
                 elif name == "type": symbols["types"].append({"name": symbol_name, "line": line})
                 elif name == "variable": symbols["variables"].append({"name": symbol_name, "line": line})
+                elif name == "import": symbols["imports"].append({"name": symbol_name, "line": line})
+                elif name == "call": symbols["calls"].append({"name": symbol_name, "line": line})
             
-            self.symbol_index[file_path] = symbols
+            # self.symbol_index[file_path] = symbols
+            workspace_manager.update_symbol_registry(file_path, symbols)
             return symbols
         except Exception as e:
             print(f"Error parsing {file_path}: {e}")
@@ -112,7 +126,7 @@ class ASTMapper:
         return symbols
 
     def get_all_symbols(self, root_dir: str):
-        self.symbol_index = {} # Clear for fresh scan
+        workspace_manager.clear_symbol_registry() # Clear for fresh scan
         for root, _, files in os.walk(root_dir):
             if any(exc in root for exc in ["node_modules", ".git", "__pycache__"]):
                 continue
@@ -120,7 +134,7 @@ class ASTMapper:
                 if any(file.endswith(ext) for ext in self.parsers):
                     full_path = os.path.join(root, file)
                     self.parse_file(full_path)
-        return self.symbol_index
+        return workspace_manager.get_symbol_registry()
 
 ast_mapper = ASTMapper()
 
